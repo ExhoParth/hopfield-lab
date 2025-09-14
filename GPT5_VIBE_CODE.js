@@ -5,16 +5,8 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
 // ----------------------
-// Beautiful Neuron Graph
+// Beautiful Neuron Graph (brighter)
 // ----------------------
-// Features:
-// - Soft physically-based materials (MeshStandardMaterial)
-// - Environment lighting + point lights
-// - Orbit controls for smooth interaction
-// - Bloom postprocess for glow
-// - Smooth selection glow & pulsing
-// - Subtle fog + background radial gradient via CSS
-// - Responsive + high-DPI support
 
 // Scene + camera
 const scene = new THREE.Scene();
@@ -29,7 +21,8 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.0;
+// increased exposure for brighter overall appearance
+renderer.toneMappingExposure = 1.25;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.style.margin = '0';
@@ -44,7 +37,7 @@ bg.style.top = '0';
 bg.style.right = '0';
 bg.style.bottom = '0';
 bg.style.zIndex = '-1';
-bg.style.background = 'radial-gradient(ellipse at 20% 20%, #10243a 0%, #061023 40%, #020417 100%)';
+bg.style.background = 'radial-gradient(ellipse at 20% 20%, #1b3a53 0%, #082033 30%, #030617 100%)';
 document.body.appendChild(bg);
 
 // Controls
@@ -54,22 +47,23 @@ controls.dampingFactor = 0.08;
 controls.minDistance = 8;
 controls.maxDistance = 80;
 
-// Postprocessing (bloom)
+// Postprocessing (bloom) — stronger bloom for more glow
 const composer = new EffectComposer(renderer);
 composer.setSize(window.innerWidth, window.innerHeight);
 const renderPass = new RenderPass(scene, camera);
 composer.addPass(renderPass);
-const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.9, 0.4, 0.15);
-bloomPass.threshold = 0.15;
-bloomPass.strength = 0.9;
-bloomPass.radius = 0.6;
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.6, 0.6, 0.9);
+// lower threshold so more things bloom, increase strength and radius
+bloomPass.threshold = 0.08;
+bloomPass.strength = 1.6;
+bloomPass.radius = 1.0;
 composer.addPass(bloomPass);
 
-// Lights
-const hemi = new THREE.HemisphereLight(0xfff6e6, 0x081827, 0.55);
+// Lights: increased intensities
+const hemi = new THREE.HemisphereLight(0xfff6e6, 0x081827, 1.1); // brighter ambient-ish
 scene.add(hemi);
 
-const key = new THREE.DirectionalLight(0xffffff, 0.8);
+const key = new THREE.DirectionalLight(0xffffff, 1.6); // stronger key
 key.position.set(12, 18, 8);
 key.castShadow = true;
 key.shadow.camera.left = -30;
@@ -79,29 +73,31 @@ key.shadow.camera.bottom = -30;
 key.shadow.mapSize.set(2048, 2048);
 scene.add(key);
 
-// subtle rim/backlight to make nodes pop
-const rim = new THREE.PointLight(0x6fd3ff, 0.8, 60, 2);
+// subtle rim/backlight to make nodes pop — stronger now
+const rim = new THREE.PointLight(0x7fe9ff, 1.6, 80, 2);
 rim.position.set(-18, 12, -8);
 scene.add(rim);
 
 // Parameters
 const NODE_COUNT = 75;
-const SPREAD = 92;
+const SPREAD = 26;
 const MIN_DIST_FOR_EDGE = 3.2;
 const MAX_EDGES_PER_NODE = 3;
 
-// Materials
+// Materials — make base emissive a bit stronger for easier bloom
 const nodeMaterial = new THREE.MeshStandardMaterial({
   color: 0x63d1ff,
-  metalness: 0.12,
-  roughness: 0.38,
-  emissive: 0x05202c,
-  emissiveIntensity: 0.6
+  metalness: 0.9,
+  roughness: 0.6,
+  emissive: 0x073842,
+  emissiveIntensity: 1.0
 });
 const linkMaterial = new THREE.MeshStandardMaterial({
-  color: 0x6b7ef5,
+  color: 0x8a6efc,
   metalness: 0.25,
-  roughness: 0.45
+  roughness: 0.35,
+  emissive: 0x001a2b,
+  emissiveIntensity: 0.12
 });
 
 // Groups
@@ -123,9 +119,15 @@ function randomPointInSphere(radius) {
 const nodes = [];
 for (let i = 0; i < NODE_COUNT; i++) {
   const pos = randomPointInSphere(SPREAD);
-  const radius = 0.75 * (0.8 + Math.random() * 0.9);
-  const geo = new THREE.SphereGeometry(radius, 40, 36);
+  const radius = 0.75 * (0.75 + Math.random() * 0.025);
+  const geo = new THREE.SphereGeometry(radius, 20, 36);
   const mat = nodeMaterial.clone();
+  // slightly brighten per-node color
+  const h = 0.55 + (Math.random() - 0.5) * 0.06;
+  const s = 0.85;
+  const l = 0.58;
+  mat.color = new THREE.Color().setHSL(h, s, l);
+  mat.emissiveIntensity = 1.0 + Math.random() * 0.6;
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
@@ -137,30 +139,64 @@ for (let i = 0; i < NODE_COUNT; i++) {
     radius,
     selected: false,
     selectionLight: null,
-    glowSprite: null
+    glowSprite: null,
+    autoLit: false,
+    neighbors: []
   };
   nodeGroup.add(mesh);
   nodes.push(mesh);
 }
 
-// Links: create cylinders with smooth orientation
-function createCylinderBetweenPoints(start, end, radius = 0.08) {
+// Links: create cylinders with smooth orientation (thick middle)
+function createThickMiddleConnector(start, end, baseRadius = 0.06, radialSegments = 18, heightSegments = 12) {
   const dir = new THREE.Vector3().subVectors(end, start);
   const length = dir.length();
-  const geometry = new THREE.CylinderGeometry(radius, radius, length, 18, 1, true);
+
+  const geometry = new THREE.CylinderGeometry(1, 1, length, radialSegments, heightSegments, true);
+  const posAttr = geometry.attributes.position;
+
+  const radiusFunc = (t) => {
+    const mid = Math.sin(Math.PI * t);
+    return baseRadius * (0.35 + 0.95 * mid);
+  };
+
+  for (let i = 0; i < posAttr.count; i++) {
+    const x = posAttr.getX(i);
+    const y = posAttr.getY(i);
+    const z = posAttr.getZ(i);
+    const t = (y + length / 2) / length;
+    const desiredR = radiusFunc(t);
+    const curR = Math.sqrt(x * x + z * z) + 1e-9;
+    const scale = desiredR / curR;
+    posAttr.setXYZ(i, x * scale, y, z * scale);
+  }
+
+  posAttr.needsUpdate = true;
+  geometry.computeVertexNormals();
+
   const mesh = new THREE.Mesh(geometry, linkMaterial.clone());
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+
+  // store baseline emissive info for simulation
+  mesh.userData = {
+    baseEmissive: mesh.material.emissive ? mesh.material.emissive.clone() : new THREE.Color(0x000000),
+    baseEmissiveIntensity: mesh.material.emissiveIntensity || 0,
+    autoLit: false
+  };
+
   const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
   mesh.position.copy(midpoint);
   const up = new THREE.Vector3(0, 1, 0);
   const quat = new THREE.Quaternion().setFromUnitVectors(up, dir.clone().normalize());
   mesh.quaternion.copy(quat);
+
   return mesh;
 }
 
 // Build edges with simple degree limiting
 const degrees = new Array(nodes.length).fill(0);
+const links = [];
 for (let i = 0; i < nodes.length; i++) {
   const candidates = [];
   for (let j = 0; j < nodes.length; j++) {
@@ -174,19 +210,23 @@ for (let i = 0; i < nodes.length; i++) {
     if (added >= MAX_EDGES_PER_NODE) break;
     if (degrees[c.j] >= MAX_EDGES_PER_NODE) continue;
     if (i < c.j) {
-      const link = createCylinderBetweenPoints(nodes[i].position, nodes[c.j].position, 0.06);
-      // subtle taper effect via scaling
+      const link = createThickMiddleConnector(nodes[i].position, nodes[c.j].position, 0.06);
       link.scale.x = link.scale.y = 0.85 + Math.random() * 0.3;
       linkGroup.add(link);
+      links.push(link);
       degrees[i] += 1;
       degrees[c.j] += 1;
       added++;
+
+      // record neighbors for cluster flashing
+      nodes[i].userData.neighbors.push(nodes[c.j]);
+      nodes[c.j].userData.neighbors.push(nodes[i]);
     }
   }
 }
 
-// Add soft particles (glow dust) using Points with additive blending via PointsMaterial
-const particleCount = 180;
+// Add soft particles (glow dust) — brighter and slightly larger
+const particleCount = 220;
 const pGeo = new THREE.BufferGeometry();
 const pPositions = new Float32Array(particleCount * 3);
 const pSizes = new Float32Array(particleCount);
@@ -195,16 +235,16 @@ for (let i = 0; i < particleCount; i++) {
   pPositions[i * 3 + 0] = p.x;
   pPositions[i * 3 + 1] = p.y;
   pPositions[i * 3 + 2] = p.z;
-  pSizes[i] = 3.5 + Math.random() * 6.5;
+  pSizes[i] = 4.5 + Math.random() * 8.5;
 }
 pGeo.setAttribute('position', new THREE.BufferAttribute(pPositions, 3));
 pGeo.setAttribute('size', new THREE.BufferAttribute(pSizes, 1));
 
 const particleMaterial = new THREE.PointsMaterial({
-  size: 0.18,
+  size: 0.22,
   sizeAttenuation: true,
   transparent: true,
-  opacity: 0.9,
+  opacity: 1.0,
   depthWrite: false,
   blending: THREE.AdditiveBlending
 });
@@ -215,18 +255,18 @@ scene.add(particles);
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 
-// Create a soft glow sprite to attach to selected nodes
+// Create a soft glow sprite to attach to selected nodes (brighter gradient)
 function makeGlowSprite(color = 0xa6ecff, scale = 1.0) {
   const size = 256;
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;
   const ctx = canvas.getContext('2d');
 
-  // draw radial gradient
+  // stronger radial gradient for brighter glow
   const grd = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  grd.addColorStop(0, 'rgba(255,255,255,0.95)');
-  grd.addColorStop(0.15, 'rgba(1,124,1,0.9)');
-  grd.addColorStop(0.35, 'rgba(12,12,255,0.45)');
+  grd.addColorStop(0, 'rgba(255,255,255,1.0)');
+  grd.addColorStop(0.12, 'rgba(166,236,255,0.98)');
+  grd.addColorStop(0.3, 'rgba(100,220,255,0.7)');
   grd.addColorStop(1, 'rgba(2,4,7,0)');
   ctx.fillStyle = grd;
   ctx.fillRect(0, 0, size, size);
@@ -239,27 +279,25 @@ function makeGlowSprite(color = 0xa6ecff, scale = 1.0) {
   return sprite;
 }
 
-// Selection logic: allow multiple selections; each selected node gets a gentle point light + glow sprite that pulses
+// Selection logic: selection light is brighter now
 function selectNode(node) {
   const ud = node.userData;
-  if (ud.selected) return; // already selected
+  if (ud.selected) return;
 
-  // Point light attached to node
-  const pl = new THREE.PointLight(0xf0f1ff, 1.6, 10, 2);
+  // stronger point light attached to node
+  const pl = new THREE.PointLight(0xf8fbff, 2.6, 14, 2);
   pl.position.set(0, 0, 0);
-  pl.castShadow = false; // avoid shadow cost
+  pl.castShadow = false;
   node.add(pl);
   ud.selectionLight = pl;
 
-  // Glow sprite
   const sprite = makeGlowSprite(0xa6ecff, 1.0 + node.userData.radius * 0.15);
   sprite.position.set(0, 0, 0.01);
   node.add(sprite);
   ud.glowSprite = sprite;
 
-  // visual changes
-  node.material.emissive = new THREE.Color(0x16303a);
-  node.material.emissiveIntensity = 0.9;
+  node.material.emissive = new THREE.Color(0x1b4048);
+  node.material.emissiveIntensity = 1.4;
   ud.selected = true;
 }
 
@@ -271,8 +309,8 @@ function deselectNode(node) {
   ud.selectionLight = null;
   ud.glowSprite = null;
 
-  node.material.emissive.setHex(0x05202c);
-  node.material.emissiveIntensity = 0.6;
+  node.material.emissive.setHex(0x073842);
+  node.material.emissiveIntensity = 1.0;
   ud.selected = false;
 }
 
@@ -300,6 +338,119 @@ window.addEventListener('keydown', (ev) => {
   }
 });
 
+// ---------------------------
+// Random auto-lighting system (EXTREME activity + cluster bursts)
+// ---------------------------
+// Config: very high activity (unchanged from prior extreme)
+const AUTO_INTERVAL_MS = 40;     // try launching bursts every 40ms
+const NODE_PROBABILITY = 0.62;   // slightly favor nodes
+const MIN_FLASH_MS = 3;        // each flash lasts at least 400ms
+const MAX_FLASH_MS = 34;       // flashes can last up to 4000ms
+const MAX_SIMULTANEOUS = 80;     // allow up to 80 simultaneous auto-lit items (bumped higher)
+
+// cluster behavior
+const CLUSTER_CHANCE = 0.36;
+const CLUSTER_FACTOR = 0.35;
+
+const autoActive = new Set();
+
+function flashNodeRandomly(node, duration, isClustered = false) {
+  if (!node || node.userData.autoLit) return;
+  node.userData.autoLit = true;
+  autoActive.add(node);
+
+  const wasSelected = node.userData.selected;
+  // temporarily apply selection visuals (brighter now)
+  selectNode(node);
+
+  // cluster neighbors sometimes
+  if (!isClustered && Math.random() < CLUSTER_CHANCE && node.userData.neighbors && node.userData.neighbors.length > 0) {
+    const neigh = node.userData.neighbors.slice();
+    const pickCount = Math.max(1, Math.floor(neigh.length * CLUSTER_FACTOR));
+    for (let i = 0; i < pickCount; i++) {
+      const idx = Math.floor(Math.random() * neigh.length);
+      const neighbor = neigh.splice(idx, 1)[0];
+      const ndur = Math.max(220, duration * (0.35 + Math.random() * 0.6));
+      setTimeout(() => flashNodeRandomly(neighbor, ndur, true), 20 + Math.random() * 90);
+    }
+  }
+
+  setTimeout(() => {
+    node.userData.autoLit = false;
+    autoActive.delete(node);
+    if (!wasSelected) {
+      deselectNode(node);
+    }
+  }, duration);
+}
+
+function flashLinkRandomly(link, duration) {
+  if (!link || link.userData.autoLit) return;
+  link.userData.autoLit = true;
+  autoActive.add(link);
+
+  const mat = link.material;
+  const baseEmissive = link.userData.baseEmissive ? link.userData.baseEmissive.clone() : new THREE.Color(0x000000);
+  const baseIntensity = link.userData.baseEmissiveIntensity || 0;
+
+  // brighter link flash
+  mat.emissive = new THREE.Color(0x9ff7ff);
+  const targetIntensity = 2.6;
+  const targetScale = link.scale.clone().multiplyScalar(1.24);
+  const start = performance.now();
+
+  function animatePulse(now) {
+    const elapsed = now - start;
+    if (elapsed < duration) {
+      let t = elapsed / duration;
+      const amp = Math.sin(Math.PI * t);
+      mat.emissiveIntensity = baseIntensity + (targetIntensity - baseIntensity) * amp;
+      link.scale.lerp(targetScale, 0.08 * amp + 0.02);
+      requestAnimationFrame(animatePulse);
+    } else {
+      mat.emissive = baseEmissive.clone();
+      mat.emissiveIntensity = baseIntensity;
+      link.scale.lerp(link.scale.clone().multiplyScalar(0.9999), 0.5);
+      link.userData.autoLit = false;
+      autoActive.delete(link);
+    }
+  }
+  requestAnimationFrame(animatePulse);
+}
+
+// Burst scheduler: very large bursts (6..20) — more aggressive now
+const autoTimer = setInterval(() => {
+  const burstSize = 8 + Math.floor(Math.random() * 24); // 8..31
+
+  for (let b = 0; b < burstSize; b++) {
+    if (autoActive.size >= MAX_SIMULTANEOUS) return;
+
+    if (Math.random() < NODE_PROBABILITY && nodes.length > 0) {
+      const candidates = nodes.filter(n => !n.userData.autoLit);
+      if (candidates.length === 0) continue;
+      const node = candidates[Math.floor(Math.random() * candidates.length)];
+      const dur = MIN_FLASH_MS + Math.random() * (MAX_FLASH_MS - MIN_FLASH_MS);
+      flashNodeRandomly(node, dur);
+    } else if (links.length > 0) {
+      const candidates = links.filter(l => !l.userData.autoLit);
+      if (candidates.length === 0) continue;
+      const link = candidates[Math.floor(Math.random() * candidates.length)];
+      const dur = MIN_FLASH_MS + Math.random() * (MAX_FLASH_MS - MIN_FLASH_MS);
+      flashLinkRandomly(link, dur);
+    }
+  }
+}, AUTO_INTERVAL_MS);
+
+window.__autoLighting = {
+  stop: () => clearInterval(autoTimer),
+  setInterval: (ms) => { /* reload required to re-create timer */ },
+  config: { AUTO_INTERVAL_MS, NODE_PROBABILITY, MIN_FLASH_MS, MAX_FLASH_MS, MAX_SIMULTANEOUS, CLUSTER_CHANCE, CLUSTER_FACTOR }
+};
+
+// ---------------------------
+// End auto-lighting block
+// ---------------------------
+
 // On resize
 function onResize() {
   const w = window.innerWidth;
@@ -316,23 +467,20 @@ let t = 0;
 function animate() {
   t += 0.016;
 
-  // pulse nodes, and gently rotate the whole network
   nodeGroup.children.forEach((node, idx) => {
     const ud = node.userData;
     const base = ud.selected ? 1.12 : 1.0;
     const scale = base + Math.sin(t * ud.pulseSpeed + idx * 0.5) * ud.pulseAmount;
     node.scale.setScalar(scale);
 
-    // if selected, make glow pulse
     if (ud.selected && ud.glowSprite) {
       const s = 1.0 + 0.08 * Math.sin(t * 3.0 + idx);
       ud.glowSprite.scale.setScalar((1.0 + ud.radius * 0.15) * s * 3.6);
-      if (ud.selectionLight) ud.selectionLight.intensity = 1.2 + 0.6 * Math.sin(t * 3.0 + idx);
+      if (ud.selectionLight) ud.selectionLight.intensity = 2.0 + 1.0 * Math.sin(t * 3.0 + idx);
     }
 
-    // color shift for subtle life
     const h = 0.55 + 0.04 * Math.sin(t * ud.pulseSpeed + idx * 0.5);
-    node.material.color.setHSL(h, 0.82, 0.54);
+    node.material.color.setHSL(h, 0.82, 0.57);
   });
 
   nodeGroup.rotation.y += 0.0025;
@@ -354,12 +502,12 @@ info.style.position = 'fixed';
 info.style.left = '16px';
 info.style.bottom = '16px';
 info.style.padding = '10px 14px';
-info.style.background = 'linear-gradient(180deg, rgba(0,0,0,0.35), rgba(0,0,0,0.25))';
+info.style.background = 'linear-gradient(180deg, rgba(0,0,0,0.28), rgba(0,0,0,0.16))';
 info.style.color = '#eaf6ff';
 info.style.fontFamily = 'Inter, Roboto, sans-serif';
 info.style.fontSize = '13px';
 info.style.borderRadius = '8px';
 info.style.backdropFilter = 'blur(6px)';
-info.style.boxShadow = '0 6px 18px rgba(0,0,0,0.6)';
+info.style.boxShadow = '0 6px 18px rgba(0,0,0,0.5)';
 info.innerHTML = `Click nodes to toggle glow & light • Drag to orbit • Press 'c' to clear`;
 document.body.appendChild(info);
