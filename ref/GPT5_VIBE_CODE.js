@@ -79,10 +79,10 @@ rim.position.set(-18, 12, -8);
 scene.add(rim);
 
 // Parameters
-const NODE_COUNT = 75;
-const SPREAD = 26;
-const MIN_DIST_FOR_EDGE = 3.2;
-const MAX_EDGES_PER_NODE = 3;
+const NODE_COUNT = 100;
+const SPREAD = 15;
+const MIN_DIST_FOR_EDGE = 8;
+const MAX_EDGES_PER_NODE = 2;
 
 // Materials — make base emissive a bit stronger for easier bloom
 const nodeMaterial = new THREE.MeshStandardMaterial({
@@ -119,7 +119,7 @@ function randomPointInSphere(radius) {
 const nodes = [];
 for (let i = 0; i < NODE_COUNT; i++) {
   const pos = randomPointInSphere(SPREAD);
-  const radius = 0.75 * (0.75 + Math.random() * 0.025);
+  const radius = 0.45 * (0.45 + Math.random() * 0.025);
   const geo = new THREE.SphereGeometry(radius, 20, 36);
   const mat = nodeMaterial.clone();
   // slightly brighten per-node color
@@ -342,11 +342,11 @@ window.addEventListener('keydown', (ev) => {
 // Random auto-lighting system (EXTREME activity + cluster bursts)
 // ---------------------------
 // Config: very high activity (unchanged from prior extreme)
-const AUTO_INTERVAL_MS = 40;     // try launching bursts every 40ms
-const NODE_PROBABILITY = 0.62;   // slightly favor nodes
-const MIN_FLASH_MS = 3;        // each flash lasts at least 400ms
-const MAX_FLASH_MS = 34;       // flashes can last up to 4000ms
-const MAX_SIMULTANEOUS = 80;     // allow up to 80 simultaneous auto-lit items (bumped higher)
+const AUTO_INTERVAL_MS = 60;     // try launching bursts every 40ms
+const NODE_PROBABILITY = 0.48;   // slightly favor nodes
+const MIN_FLASH_MS = 20;        // each flash lasts at least 400ms
+const MAX_FLASH_MS = 30;       // flashes can last up to 4000ms
+const MAX_SIMULTANEOUS = 20;     // allow up to 80 simultaneous auto-lit items (bumped higher)
 
 // cluster behavior
 const CLUSTER_CHANCE = 0.36;
