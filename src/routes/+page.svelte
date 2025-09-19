@@ -1,46 +1,99 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import type { SvelteComponent } from 'svelte';
-  import ConfigPanel from '$lib/config.svelte';
+  import { onMount, onDestroy } from 'svelte';
+  import * as THREE from 'three';
 
-  let ThreeComponent: typeof SvelteComponent | null = null;
-  let loadError: string | null = null;
+  let canvas: HTMLCanvasElement | null = null;
 
-  onMount(async () => {
-    try {
-      // dynamic import only in browser
-      const mod = await import('$lib/three.svelte');
-      ThreeComponent = mod.default;
-    } catch (e) {
-      console.error('Failed to load Three component', e);
-      loadError = String(e);
+  // we'll initialize these in onMount
+  let renderer: THREE.WebGLRenderer | null = null;
+  let scene: THREE.Scene | null = null;
+  let camera: THREE.PerspectiveCamera | null = null;
+  let cube: THREE.Mesh | null = null;
+  let rafId = 0;
+
+  // declare resize so we can remove listener in onDestroy
+  let resize: () => void = () => {};
+
+  onMount(() => {
+    if (!canvas) return;
+
+    // Renderer
+    renderer = new THREE.WebGLRenderer({ antialias: true, canvas });
+    renderer.setPixelRatio(window.devicePixelRatio ?? 1);
+
+    // Scene + Camera
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
+    camera.position.z = 3;
+
+    // Cube
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const material = new THREE.MeshNormalMaterial();
+    cube = new THREE.Mesh(geometry, material);
+    scene.add(cube);
+
+    // Resize handler
+    resize = () => {
+      if (!canvas || !renderer || !camera) return;
+      const w = canvas.clientWidth || window.innerWidth;
+      const h = canvas.clientHeight || window.innerHeight;
+      renderer.setSize(w, h, false);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+    };
+    // run once and listen
+    resize();
+    window.addEventListener('resize', resize);
+
+    // Animation loop
+    const animate = (t: number) => {
+      if (!renderer || !scene || !camera || !cube) return;
+      const time = t * 0.001;
+      cube.rotation.x = time * 0.6;
+      cube.rotation.y = time * 0.9;
+
+      renderer.render(scene, camera);
+      rafId = requestAnimationFrame(animate);
+    };
+    rafId = requestAnimationFrame(animate);
+  });
+
+  onDestroy(() => {
+    // stop loop
+    cancelAnimationFrame(rafId);
+    window.removeEventListener('resize', resize);
+
+    // dispose resources safely
+    if (cube) {
+      if (cube.geometry) (cube.geometry as THREE.BufferGeometry).dispose();
+      if (Array.isArray(cube.material)) {
+        cube.material.forEach((m) => (m as THREE.Material).dispose());
+      } else {
+        (cube.material as THREE.Material).dispose();
+      }
+      scene?.remove(cube);
+      cube = null;
     }
+
+    if (renderer) {
+      // try to lose context for cleaner cleanup
+      const gl = renderer.getContext();
+      renderer.dispose();
+      if (gl && (gl as any).getExtension) {
+        const loseExt = (gl as any).getExtension('WEBGL_lose_context');
+        if (loseExt) loseExt.loseContext();
+      }
+      renderer = null;
+    }
+
+    scene = null;
+    camera = null;
   });
 </script>
 
-{#if loadError}
-  <div class="error">Error loading 3D: {loadError}</div>
-{:else}
-  {#if ThreeComponent}
-    <svelte:component this={ThreeComponent} />
-  {:else}
-    <div class="loading">Loading 3D...</div>
-  {/if}
-{/if}
-
-<!-- config panel sits on top of the 3D canvas -->
-<ConfigPanel />
-
 <style>
-  /* small helper styles */
-  .loading, .error {
-    position: fixed;
-    top: 12px;
-    left: 12px;
-    z-index: 50;
-    background: rgba(0,0,0,0.6);
-    color: white;
-    padding: 8px 12px;
-    border-radius: 8px;
-  }
+  :global(body) { margin: 0; }
+  canvas { display: block; width: 100vw; height: 100vh; }
 </style>
+
+<canvas bind:this={canvas} id="c" />
